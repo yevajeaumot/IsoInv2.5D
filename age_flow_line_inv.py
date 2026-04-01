@@ -254,7 +254,9 @@ class FlowLine(object):
              1./3 * (self.a_fld[1:]-self.a_fld[:-1]) * (self.Y_fld[1:]-self.Y_fld[:-1]))
         dQdx = np.insert(dQdx, 0, 0)
         Q_fld = np.cumsum(dQdx)
-        
+
+        self.m_fld = np.interp(self.x_fld, self.x_inv, self.m_try)
+
         # Computation of basal melting flux Qm
         dQmdx = (self.x_fld[1:]-self.x_fld[:-1]) * 1000 * \
             (self.m_fld[:-1] * self.Y_fld[:-1] +
@@ -1674,6 +1676,7 @@ class FlowLine(object):
         self.initial_setup()
         # run interpolation once
         self.a_try = self.a_inv
+        self.m_try = self.m_inv
         self.p_try = self.p_prime_inv
         self.H_try = self.H_inv
         self.Delta_try = self.Delta_inv
