@@ -95,3 +95,4 @@ If you have defined virtual ice cores, it has also created some output files:
 - `IC_ice_core_vs_depth.pdf`: figure with a few quantities as a function of the depth in the _IC_ ice core
 - `IC_ice_core_vs_age.pdf`: figure with a few quantities as a function of the age in the _IC_ ice core
 
+# IsoInv2.5D
