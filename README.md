@@ -4,7 +4,7 @@ A 2.5D numerical model constrained by radar horizons which determines the age an
 
 ## Background
 
-This model is based on ice flow equations derived by Parrenin and Hindmarsh, 2007. The forward model was then developed in Python by Parrenin et al (2025, preprint) and is available to download here https://github.com/parrenin/age_flow_line/. This code is for an inverse model which applies the "age_flow_line" forward model and uses radar observed isochrones to constrain the optimisation of ice flow parameters. The details of the inverse model are presented in Chung et al. (2024, preprint).
+This model is based on ice flow equations derived by Parrenin and Hindmarsh, 2007. The forward model was then developed in Python by Parrenin et al (2025) and is available to download here https://github.com/parrenin/age_flow_line/. This code is for an inverse model which applies the "age_flow_line" forward model and uses radar observed isochrones to constrain the optimisation of ice flow parameters. The details of the inverse model are presented in Chung et al. (2025).
 
 #### References
 Chung, A., Parrenin, F., Mulvaney, R., Vittuari, L., Frezzotti, M., Zanutta, A., Lilien, D. A., Cavitte, M., & Eisen, O. (2024). Age, thinning and spatial origin of the Beyond EPICA ice from a 2.5D ice flow model. EGUsphere Preprint Repository. https://doi.org/10.5194/egusphere-2024-1650
