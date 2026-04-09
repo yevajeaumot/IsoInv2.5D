@@ -596,13 +596,15 @@ class FlowLine(object):
 
             for j in range(self.imax):
                 self.age_density[1:-2,j] = 1/self.a[j]*(1/ self.mat_tau[1:-1, j] + 1/self.mat_tau[:-2, j])/2
-
+            
+            self.jac_mat_age = np.nan_to_num(self.jac_mat_age, nan=0.0)
             #self.melt_calc()
-            return np.concatenate((self.a_try, self.p_try, self.H_try, self.m_inv, self.jac_mat_age.flatten()))
+            return np.concatenate((self.a_try, self.p_try, self.Delta_try, self.m_inv, self.jac_mat_age.flatten()))
 
     # get jacobian for given index
     def jacobian(self):
         self.jac = True         # makes age calc return jacobian values
+        self.variables = self.variables.flatten()
         epsilon = np.sqrt(np.diag(self.hess))/10000000000.
         model0 = self.age_calc()
         # model0 should be a_try, p_try, H_try ie the optimised values
@@ -618,7 +620,9 @@ class FlowLine(object):
             jacob[i, :] = (model1-model2)/2./epsilon[i]
             self.variables[i] = self.variables[i]+epsilon[i]
         self.residuals(self.variables)
-
+        
+        #self.variables = self.variables.reshape((3, -1))
+        
         return jacob
 
     # get uncertainties for various parameters
@@ -635,10 +639,7 @@ class FlowLine(object):
         self.sigma_p = np.sqrt(np.diag(self.hess[index:index+self.ninv+1, index:index+self.ninv+1]))*self.p_try
         index = index+self.ninv+1
 
-        self.sigma_h = np.sqrt(np.diag(self.hess[index:index+self.ninv+1, index:index+self.ninv+1]))*self.H_try
-        index = index+self.ninv+1
-        
-        self.sigma_Delta = np.sqrt(np.diag(self.hess[index:index+self.ninv+1, index:index+self.ninv+1]))*self.Delta_try
+        self.sigma_Delta = np.sqrt(np.diag(self.hess[index:index+self.ninv+1, index:index+self.ninv+1]))
         index = index+self.ninv+1
 
         c_model = np.dot(np.transpose(jacob[:, index:index+self.ninv+1]),
@@ -677,15 +678,6 @@ class FlowLine(object):
                           self.a_try * self.Delta_try, 
                           0.0)
         
-        
-        # #Delta > 0 : basal meting 
-        # mask_melting = self.Delta_try > 0
-        # self.m_try[mask_melting] = self.Delta_try[mask_melting] * self.a_try[mask_melting]
-        
-        # # Delta < 0 : stagnant ice
-        # mask_stagnant = self.Delta_try < 0
-        # self.H_try[mask_stagnant] = self.H_inv[mask_stagnant] * (1 + self.Delta_try[mask_stagnant])
-            
         # interpolate on to new x coords
         self.interpolation()
 
@@ -707,14 +699,14 @@ class FlowLine(object):
         resp = ((self.p_prime_try-np.log(self.p_prior+1))/\
                self.p_prime_sigma).flatten()
             
-        #resd = ((self.Delta_try - self.Delta_inv)/ self.Delta_sigma).flatten()
+        resd = ((self.Delta_try- self.Delta_inv)/ self.Delta_sigma).flatten()
         
 
         # resh = ((np.log(self.H_try)-np.log(self.H_inv))/\
         #                      self.H_sigma).flatten()
 
         #resi = np.concatenate((self.resi, resa, resp, resh))
-        resi = np.concatenate((self.resi, resa, resp))
+        resi = np.concatenate((self.resi, resa, resp, resd))
         
 
         resi = resi[np.where(~np.isnan(resi))]
@@ -779,7 +771,7 @@ class FlowLine(object):
                 self.sigma()
         else:
             self.sigma_a = np.zeros_like(self.x_inv)
-            self.sigma_h = np.zeros_like(self.x_inv)
+            self.sigma_Delta = np.zeros_like(self.x_inv)
             self.sigma_m = np.zeros_like(self.x_inv)
             self.sigma_p = np.zeros_like(self.x_inv)
             self.sigma_age = np.zeros_like(self.x_inv)
@@ -919,7 +911,7 @@ class FlowLine(object):
             self.ic[name]['a0'] = np.append(self.ic[name]['a0'], np.nan)
             self.ic[name]['tau'] = np.append(self.ic[name]['tau'], np.nan)
             self.ic[name]['stag'] = np.interp(self.ic[name]['x'], self.x_inv, self.stagnant)
-            self.ic[name]['melting'] = np.interp(self.ic[name]['x'], self.x_inv, self.m_inv)
+            self.ic[name]['melting'] = np.interp(self.ic[name]['x'], self.x_inv, self.m_try)
             self.ic[name]['p'] = np.interp(self.ic[name]['x'], self.x_inv, self.p_try)
             self.ic[name]['steady_accu'] = np.interp(self.ic[name]['x'], self.x_inv, self.a_try)
             self.ic[name]['H_obs'] = np.interp(self.ic[name]['x'], self.x_inv, self.H_inv)
@@ -974,8 +966,8 @@ class FlowLine(object):
             # output = np.vstack((self.x_inv, self.a_try, self.sigma_a, self.p_try, self.sigma_p, self.H_try, self.sigma_h, self.m_inv, self.sigma_m, self.H_ref, self.H_inv)).T
             # np.savetxt(self.label+'inverted_results.txt', output, delimiter='\t', header='x(m),a, sigma_a,p, sigma_p,H, sigma_H, m,sigma_m, refrozen, H_obs')
             
-            output = np.vstack((self.x_inv, self.a_try, self.sigma_a, self.p_try, self.sigma_p, self.H_try, self.sigma_h, self.m_inv, self.sigma_m, self.H_inv)).T
-            np.savetxt(self.label+'inverted_results.txt', output, delimiter='\t', header='x(m),a, sigma_a,p, sigma_p,H, sigma_H, m,sigma_m, H_obs')
+            output = np.vstack((self.x_inv, self.a_try, self.sigma_a, self.p_try, self.sigma_p, self.H_try, self.m_inv, self.sigma_m, self.H_inv)).T
+            np.savetxt(self.label+'inverted_results.txt', output, delimiter='\t', header='x(m),a, sigma_a,p, sigma_p,H, m,sigma_m, H_obs')
 
             self.stagnant = self.H_inv - self.H_try
             self.stagnant[self.stagnant<0] = np.nan
@@ -1516,23 +1508,24 @@ class FlowLine(object):
                 fig, ax = plt.subplots(4, figsize=(7,10))
                 ax[0].plot(self.x_inv, self.a_try, color='C0')
                 ax[1].plot(self.x_inv, self.p_try, color='C1')
-                ax[2].plot(self.x_inv, self.H_try, color='C2')
-                ax[3].plot(self.x_inv, self.m_inv, color='C3')
-
+                ax[2].plot(self.x_inv, self.Delta_try, color='C2')
+                ax[3].plot(self.x_inv, self.m_try, color='C3')
+                ax3b = ax[3].twinx()
+                ax3b.plot(self.x_inv, self.stagnant, color='grey')
+                
                 ax[0].fill_between(self.x_inv, self.a_try+self.sigma_a, self.a_try-self.sigma_a, color='C0', alpha=0.3, edgecolor=None)
                 ax[1].fill_between(self.x_inv, self.p_try+self.sigma_p, self.p_try-self.sigma_p, color='C1', alpha=0.3, edgecolor=None)
-                ax[2].fill_between(self.x_inv, self.H_try+self.sigma_h, self.H_try-self.sigma_h, color='C2', alpha=0.3, edgecolor=None)
-                ax[3].fill_between(self.x_inv, self.m_inv+self.sigma_m, self.m_inv-self.sigma_m, color='C3', alpha=0.3, edgecolor=None)
-
-                ax[2].set_ylim(np.min(self.H_try)-300, np.max(self.H_try)+300)
-                ax[2].invert_yaxis()
-
-                ax[0].set_ylabel('a (m/yr)')
-                ax[1].set_ylabel('p')
-                ax[2].set_ylabel('H (m)')
-                ax[3].set_ylabel('m (m/yr)')
+                ax[2].fill_between(self.x_inv, self.Delta_try+self.sigma_Delta, self.Delta_try-self.sigma_Delta, color='C2', alpha=0.3, edgecolor=None)
+                ax[3].fill_between(self.x_inv, self.m_try+self.sigma_m, self.m_try-self.sigma_m, color='C3', alpha=0.3, edgecolor=None)
+                #ax3b.fill_between(self.x_inv, self.stagnant, 0, color='grey', alpha=0.3, edgecolor=None)
+                # ax[2].set_ylim(np.min(self.H_try)-300, np.max(self.H_try)+300)
+                # ax[2].invert_yaxis()
+                ax[0].set_ylabel('a (m/yr)', color='C0')
+                ax[1].set_ylabel('p', color='C1')
+                ax[2].set_ylabel('Delta', color='C2')
+                ax[3].set_ylabel('m (m/yr)', color='C3')
                 ax[3].set_xlabel('Distance (km)')
-
+                ax3b.set_ylabel('stagnant ice thickness (m)', color='grey')
 
                 plt.setp(ax, xlim=(np.min(self.x), np.max(self.x)))
                 plt.savefig(self.label+'inverted_params.'+self.fig_format,
@@ -1563,6 +1556,13 @@ class FlowLine(object):
                 ax2.set_xlabel('age (kyr)', color='b')
                 ax2.spines['top'].set_color('b')
                 ax2.tick_params(axis='x', colors='b')
+                
+                iso_depth_at_ic = np.array([np.interp(self.ic[name]['x'], self.x_obs, self.iso_obs_depth[i])
+                                            for i in range(self.cp_iso_nb)])
+                iso_age_at_ic   = self.iso_obs_age[:, 0] / 1000        
+                iso_sigma_at_ic = self.iso_obs_age_sigma[:, 0] / 1000  
+
+                ax2.errorbar(iso_age_at_ic, iso_depth_at_ic, xerr=iso_sigma_at_ic, fmt=".",label='depth isos', color = 'black')
 
                 ax3 = ax.twiny()
                 ax3.spines['top'].set_position(('axes', 1.1))
