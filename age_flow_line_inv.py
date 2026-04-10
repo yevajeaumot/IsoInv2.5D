@@ -734,7 +734,24 @@ class FlowLine(object):
         # radar_max_depth = np.array([np.nanmax(col) if np.any(~np.isnan(col)) else 0.0 
         #     for col in self.cp_iso_depth.T])
 
-        max_iso = np.interp(self.x_inv, self.cp_iso_x, self.cp_iso_depth[-1])
+        #max_iso = np.interp(self.x_inv, self.cp_iso_x, self.cp_iso_depth[-1]) c'est la bonne ligne 
+       
+        # raw_max_iso = np.zeros(len(self.cp_iso_x))
+        
+        # for i in range(len(self.cp_iso_x)):
+        #     #depths_at_x = self.cp_iso_depth[:, i]
+        #     valid_depths = self.cp_iso_depth[:, i][~np.isnan(self.cp_iso_depth[:, i])]
+        #     if len(valid_depths) > 0:
+        #         raw_max_iso[i] = np.max(valid_depths)
+        #     else:
+        #         raw_max_iso[i] = 0.0 # Ou une valeur de sécurité
+        
+        # max_iso = np.interp(self.x_inv, self.cp_iso_x, raw_max_iso)
+        
+        
+        raw_max_iso = np.array([np.nanmax(self.cp_iso_depth[:, i]) if np.any(~np.isnan(self.cp_iso_depth[:, i])) 
+                                else 0.0 for i in range(len(self.cp_iso_x))])
+        max_iso = np.interp(self.x_inv, self.cp_iso_x, raw_max_iso)
         
         #max_iso = np.array([np.nanmax(self.cp_iso_depth[:, x]) if np.any(~np.isnan(self.cp_iso_depth[:, x])) 
                         #else 0.0 for x in range(len(self.x_inv))])
@@ -746,7 +763,13 @@ class FlowLine(object):
         # min_Hbound = np.log(np.interp(self.x_inv,self.cp_iso_x, self.cp_iso_depth[-4]))   #for discontinuous
         #all_bounds = (np.array([-inf_bound,zero_bound,min_Hbound]).flatten() , np.array([inf_bound,inf_bound,inf_bound]).flatten())
         bounds = (np.array([-inf_bound, zero_bound, delta_min]).flatten() , np.array([inf_bound, inf_bound, delta_max]).flatten())
-     
+        
+        # Vérification individuelle
+        print("ln(a) < lower ?", np.any(np.log(self.a_inv) < -inf_bound))
+        print("p_prime < lower ?", np.any(self.p_prime_inv < zero_bound))
+        print("Delta < delta_min ?", np.any(self.Delta_inv < delta_min))
+        print("Delta > delta_max ?", np.any(self.Delta_inv > delta_max))
+        
         #H_init = np.nan_to_num(self.H_inv, nan=3000)
         #self.variables = np.array([np.log(self.a_inv), self.p_prime_inv, np.log(H_init)]).flatten()
         self.variables = np.array([np.log(self.a_inv), self.p_prime_inv, self.Delta_inv]).flatten()
@@ -755,8 +778,10 @@ class FlowLine(object):
         print(f"H_inv min/max: {np.nanmin(self.H_inv)} / {np.nanmax(self.H_inv)}")
         print(f"max_iso min/max: {np.nanmin(max_iso)} / {np.nanmax(max_iso)}")
         print(f"delta_min min/max: {np.nanmin(delta_min)} / {np.nanmax(delta_min)}")
-
-    
+        print(f"p_prime_inv min/max: {np.nanmin(self.p_prime_inv)} / {np.nanmax(self.p_prime_inv)}")
+        print(f"variables min/max  : {np.nanmin(self.variables)} / {np.nanmax(self.variables)}")
+       
+      
         # do least square fit to get variables and hessian matrix
         # leastsq_fit1D = least_squares(self.residuals, self.variables, bounds=([-np.inf, -np.inf, m.log(max_iso_depth)], [np.inf, np.inf, np.inf]), args=(j,), method='trf')
         #leastsq_fit = least_squares(self.residuals, self.variables, bounds = all_bounds, method='trf', verbose=2)
