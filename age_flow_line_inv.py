@@ -599,7 +599,7 @@ class FlowLine(object):
             
             self.jac_mat_age = np.nan_to_num(self.jac_mat_age, nan=0.0)
             #self.melt_calc()
-            return np.concatenate((self.a_try, self.p_try, self.Delta_try, self.m_inv, self.jac_mat_age.flatten()))
+            return np.concatenate((self.H_try, self.m_try, self.jac_mat_age.flatten()))
 
     # get jacobian for given index
     def jacobian(self):
@@ -620,9 +620,7 @@ class FlowLine(object):
             jacob[i, :] = (model1-model2)/2./epsilon[i]
             self.variables[i] = self.variables[i]+epsilon[i]
         self.residuals(self.variables)
-        
-        #self.variables = self.variables.reshape((3, -1))
-        
+         
         return jacob
 
     # get uncertainties for various parameters
@@ -634,12 +632,17 @@ class FlowLine(object):
 
         age_before = time.perf_counter()
         self.sigma_a = np.sqrt(np.diag(self.hess[index:index+self.ninv+1, index:index+self.ninv+1]))*self.a_try
-        index = index+self.ninv+1
+        # index = index+self.ninv+1
 
         self.sigma_p = np.sqrt(np.diag(self.hess[index:index+self.ninv+1, index:index+self.ninv+1]))*self.p_try
-        index = index+self.ninv+1
+        # index = index+self.ninv+1
 
         self.sigma_Delta = np.sqrt(np.diag(self.hess[index:index+self.ninv+1, index:index+self.ninv+1]))
+        # index = index+self.ninv+1
+
+        c_model = np.dot(np.transpose(jacob[:, index:index+self.ninv+1]),
+                         np.dot(self.hess, jacob[:, index:index+self.ninv+1]))
+        self.sigma_H = np.sqrt(np.diag(c_model))
         index = index+self.ninv+1
 
         c_model = np.dot(np.transpose(jacob[:, index:index+self.ninv+1]),
@@ -738,17 +741,6 @@ class FlowLine(object):
        
         # raw_max_iso = np.zeros(len(self.cp_iso_x))
         
-        # for i in range(len(self.cp_iso_x)):
-        #     #depths_at_x = self.cp_iso_depth[:, i]
-        #     valid_depths = self.cp_iso_depth[:, i][~np.isnan(self.cp_iso_depth[:, i])]
-        #     if len(valid_depths) > 0:
-        #         raw_max_iso[i] = np.max(valid_depths)
-        #     else:
-        #         raw_max_iso[i] = 0.0 # Ou une valeur de sécurité
-        
-        # max_iso = np.interp(self.x_inv, self.cp_iso_x, raw_max_iso)
-        
-        
         raw_max_iso = np.array([np.nanmax(self.cp_iso_depth[:, i]) if np.any(~np.isnan(self.cp_iso_depth[:, i])) 
                                 else 0.0 for i in range(len(self.cp_iso_x))])
         max_iso = np.interp(self.x_inv, self.cp_iso_x, raw_max_iso)
@@ -764,24 +756,10 @@ class FlowLine(object):
         #all_bounds = (np.array([-inf_bound,zero_bound,min_Hbound]).flatten() , np.array([inf_bound,inf_bound,inf_bound]).flatten())
         bounds = (np.array([-inf_bound, zero_bound, delta_min]).flatten() , np.array([inf_bound, inf_bound, delta_max]).flatten())
         
-        # Vérification individuelle
-        print("ln(a) < lower ?", np.any(np.log(self.a_inv) < -inf_bound))
-        print("p_prime < lower ?", np.any(self.p_prime_inv < zero_bound))
-        print("Delta < delta_min ?", np.any(self.Delta_inv < delta_min))
-        print("Delta > delta_max ?", np.any(self.Delta_inv > delta_max))
-        
         #H_init = np.nan_to_num(self.H_inv, nan=3000)
         #self.variables = np.array([np.log(self.a_inv), self.p_prime_inv, np.log(H_init)]).flatten()
         self.variables = np.array([np.log(self.a_inv), self.p_prime_inv, self.Delta_inv]).flatten()
-        print("--- Diagnostic de santé des données ---")
-        print(f"Taille H_inv: {len(self.H_inv)} | Taille x_inv: {len(self.x_inv)}")
-        print(f"H_inv min/max: {np.nanmin(self.H_inv)} / {np.nanmax(self.H_inv)}")
-        print(f"max_iso min/max: {np.nanmin(max_iso)} / {np.nanmax(max_iso)}")
-        print(f"delta_min min/max: {np.nanmin(delta_min)} / {np.nanmax(delta_min)}")
-        print(f"p_prime_inv min/max: {np.nanmin(self.p_prime_inv)} / {np.nanmax(self.p_prime_inv)}")
-        print(f"variables min/max  : {np.nanmin(self.variables)} / {np.nanmax(self.variables)}")
-       
-      
+
         # do least square fit to get variables and hessian matrix
         # leastsq_fit1D = least_squares(self.residuals, self.variables, bounds=([-np.inf, -np.inf, m.log(max_iso_depth)], [np.inf, np.inf, np.inf]), args=(j,), method='trf')
         #leastsq_fit = least_squares(self.residuals, self.variables, bounds = all_bounds, method='trf', verbose=2)
@@ -928,7 +906,9 @@ class FlowLine(object):
             self.ic[name]['dens'] = np.append(self.ic[name]['dens'],[np.nan,np.nan,np.nan])
             self.ic[name]['max_age'] = np.interp(self.dens_lim, self.ic[name]['dens'], self.ic[name]['age'] )
             # self.ic[name]['max_sigma_age'] = np.interp(self.dens_lim, self.ic[name]['dens'], self.ic[name]['sigma_age'] )
-            self.ic[name]['max_depth'] = np.interp(self.dens_lim, self.ic[name]['dens'], self.ic[name]['depth'] )
+            #self.ic[name]['max_depth'] = np.interp(self.dens_lim, self.ic[name]['dens'], self.ic[name]['depth'] )
+            mask = ~np.isnan(self.ic[name]['dens'])
+            self.ic[name]['max_depth'] = np.interp(self.dens_lim, self.ic[name]['dens'][mask], self.ic[name]['depth'][mask])
             print(name, 'max_age',self.ic[name]['max_age'], '(yrs)\n' ,'max_age_depth', self.ic[name]['max_depth'])
             # ----------------------------------------------------------
             # Output for the ice cores
@@ -998,13 +978,36 @@ class FlowLine(object):
             self.stagnant[self.stagnant<0] = np.nan
             output = np.vstack((self.x_inv, self.H_inv, self.H_try, self.stagnant, self.m_inv)).T
             np.savetxt(self.label+'stagnant.txt', output, delimiter='\t', header='x(m),Hobs, Hinverted, stagnant (m), melt rate')
-
-
+    
+            #parameters save
+            header_base = '#x_inv(km)'
+            
+            output = np.vstack((self.x_inv, self.a_try))
+            with open(self.label + 'accumulation_opt.txt', 'w') as f:
+                f.write(header_base + '\taccu_opt(ice-m/yr)\n')
+                np.savetxt(f, np.transpose(output), delimiter='\t')
+    
+            output = np.vstack((self.x_inv, self.p_try))
+            with open(self.label + 'p_Lliboutry_opt.txt', 'w') as f:
+                f.write(header_base + '\tp_opt\n')
+                np.savetxt(f, np.transpose(output), delimiter='\t')
+        
+            output = np.vstack((self.x_inv, self.Delta_try))
+            with open(self.label + 'Delta_opt.txt', 'w') as f:
+                f.write(header_base + '\tDelta_opt\n')
+                np.savetxt(f, np.transpose(output), delimiter='\t')
+                
+            
         # for checking the distance between x nodes
         self.for_dist = self.x[1:] - self.x[:-1]
         output = np.vstack((self.x[:-1], self.for_dist))
         np.savetxt(self.label+'x_mesh.txt', np.transpose(output),
                    delimiter='\t',header='x(km)\tmesh_width(m)')
+        
+      
+
+    print('Optimised parameters saved to accumulation_opt.txt, '
+          'p_Lliboutry_opt.txt, Delta_opt.txt')
 
     # plot figures showing results
     def plot_figs(self):
@@ -1699,6 +1702,24 @@ class FlowLine(object):
         self.load_data()
         self.load_obs_data()
         self.initial_setup()
+        
+        if self.start == 'restart':
+            print('Restart mode: loading optimised parameters from *_opt.txt')
+            # load and re-interpolate onto current x_inv 
+            x_opt, a_opt     = np.loadtxt(self.label + 'accumulation_opt.txt',  unpack=True)
+            x_opt, p_opt     = np.loadtxt(self.label + 'p_Lliboutry_opt.txt',   unpack=True)
+            x_opt, Delta_opt = np.loadtxt(self.label + 'Delta_opt.txt',         unpack=True)
+    
+            self.a_inv       = np.interp(self.x_inv, x_opt, a_opt)
+            self.p_inv       = np.interp(self.x_inv, x_opt, p_opt)
+            self.p_prime_inv = np.log(self.p_inv + 1)          
+            self.Delta_inv   = np.interp(self.x_inv, x_opt, Delta_opt)
+            print(f'  a_opt      : min={self.a_inv.min():.4f}  max={self.a_inv.max():.4f}')
+            print(f'  p_opt      : min={self.p_inv.min():.4f}  max={self.p_inv.max():.4f}')
+            print(f'  Delta_opt  : min={self.Delta_inv.min():.4f}  max={self.Delta_inv.max():.4f}')
+        else:
+            print('Import mode: starting from imported parameter files')
+            
         # run interpolation once
         self.a_try = self.a_inv
         self.m_try = self.m_inv
