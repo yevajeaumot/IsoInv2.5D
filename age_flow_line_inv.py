@@ -52,6 +52,7 @@ class FlowLine(object):
         self.output_ic = True
         self.output_fl = True
         self.counter = 0
+        self.grid_step = 5
         self.error = []
         self.jac = False
         self.interp_total = 0
@@ -165,7 +166,6 @@ class FlowLine(object):
         self.H_inv = np.interp(self.x_inv, self.x_H, self.H_measure)
         self.p_inv = np.interp(self.x_inv, self.x_p, self.p_measure)
         self.m_inv = np.interp(self.x_inv, self.x_m, self.m_measure)
-        
         self.Delta_inv = np.zeros_like(self.H_inv)
 
         self.p_prime_inv = np.log(self.p_inv+1)
@@ -460,57 +460,7 @@ class FlowLine(object):
         self.age_density = np.ones_like(self.mat_OMEGA)*np.nan
 
 
-    # calculate basal melt rate
-    # def melt_calc(self):
-    #     self.m = np.empty(len(self.x))
-    #     self.m[:] = np.nan
-    #     H_obs = np.interp(self.x, self.x_inv, self.H_inv)
-    #     self.x_m = np.copy(self.x)
-    #     # nan where stagnant ice
-    #     self.x_m[H_obs>self.mat_depth[-1]] = np.nan
-    #     # Qm is q at depth Hobs
-    #     Qm = np.array([np.interp(H_obs[i], self.mat_depth[:,i], self.mat_q[:,i]) for i in range(len(H_obs))])
-    #     H_obs[H_obs>self.mat_depth[-1]] = np.nan
-    #     Qm[H_obs>self.mat_depth[-1]] = np.nan
-    #     self.m = np.zeros(len(Qm))
-
-    #     # mask where melting is non zero
-    #     Qm_use = Qm[~np.isnan(Qm)]
-    #     self.x_m = self.x_m[~np.isnan(Qm)]
-    #     Y = self.Y[~np.isnan(Qm)]
-
-    #     nonnan=0       # count non nans in Qm and x_m
-    #     for point in range(1,len(Qm)):
-    #         # calculate melt rate m
-    #         if not math.isnan(Qm[point]):
-    #             self.m[point] = (Qm_use[nonnan] - Qm_use[nonnan-1]) / (Y[nonnan]* (self.x_m[nonnan] - self.x_m[nonnan-1]))
-    #             nonnan = nonnan+1
-    #         else:
-    #             self.m[point] = np.nan
-
-    #         if nonnan==1:
-    #             self.m[point]=np.nan
-
-    #     # interpolate onto optimisation grid
-    #     self.m_inv = np.interp(self.x_inv, self.x, self.m)
-
-    # determine thickness of refrozen/accreted ice
-    # def refrozen(self):
-    #     # # calc refrozen ice once at the end
-    #     self.H_interp = np.interp(self.x, self.x_inv, self.H_inv)
-    #     self.ref_dep = np.empty_like(self.H_interp)
-    #     self.ref_dep[:] = np.nan
-    #     min_q=0
-    #     #
-    #     for i in range(len(self.mat_x[:])):
-    #         end_q = len(self.mat_depth[:,i][self.mat_depth[:,i]<self.H_interp[i]])-1
-    #         if min_q<self.mat_q[end_q,i]:
-    #             min_q = self.mat_q[end_q,i]
-    #         self.ref_dep[i] = self.mat_depth[:,i][self.mat_q[:,i]>min_q][-1]
-    #         self.mat_q[:,i][self.mat_q[:,i]<min_q] = np.nan
-
-    #     self.H_ref = np.interp(self.x_inv, self.x, self.ref_dep)
-
+   
     # calculate age matrix
     def age_calc(self):
 
@@ -649,6 +599,9 @@ class FlowLine(object):
                          np.dot(self.hess, jacob[:, index:index+self.ninv+1]))
         self.sigma_m = np.sqrt(np.diag(c_model))
         index = index+self.ninv+1
+        
+        self.sigma_stagnant = np.where(self.Delta_try < 0, self.sigma_H * self.H_try,
+                               0.)
 
         # for grid of age uncertainties
         c_model = np.dot(np.transpose(jacob[:, index:index+np.size(self.jac_mat_age)]),
@@ -668,9 +621,7 @@ class FlowLine(object):
         self.a_try = np.exp(var[0])
         self.p_prime_try = var[1]                       # variable not needed
         self.p_try = np.exp(var[1])-1					# transform to p in xz coords
-        #self.H_try = np.exp(var[2])					    # H0 = inital observed ice thickness
-        # self.H_try = np.copy(self.H_inv)
-        # self.m_try = np.zeros_like(self.a_try)
+
 
         self.Delta_try = var[2]
         self.H_try = np.where(self.Delta_try < 0, 
@@ -704,11 +655,6 @@ class FlowLine(object):
             
         resd = ((self.Delta_try- self.Delta_inv)/ self.Delta_sigma).flatten()
         
-
-        # resh = ((np.log(self.H_try)-np.log(self.H_inv))/\
-        #                      self.H_sigma).flatten()
-
-        #resi = np.concatenate((self.resi, resa, resp, resh))
         resi = np.concatenate((self.resi, resa, resp, resd))
         
 
@@ -731,38 +677,20 @@ class FlowLine(object):
 
         inf_bound = np.ones(len(self.a_inv))*np.inf
         zero_bound = np.zeros(len(self.a_inv))
-        #min_Hbound_old = np.log(np.interp(self.x_inv,self.cp_iso_x, self.cp_iso_depth[-1]))
         epsilon = 1e-6
-        
-        # radar_max_depth = np.array([np.nanmax(col) if np.any(~np.isnan(col)) else 0.0 
-        #     for col in self.cp_iso_depth.T])
-
-        #max_iso = np.interp(self.x_inv, self.cp_iso_x, self.cp_iso_depth[-1]) c'est la bonne ligne 
-       
-        # raw_max_iso = np.zeros(len(self.cp_iso_x))
         
         raw_max_iso = np.array([np.nanmax(self.cp_iso_depth[:, i]) if np.any(~np.isnan(self.cp_iso_depth[:, i])) 
                                 else 0.0 for i in range(len(self.cp_iso_x))])
         max_iso = np.interp(self.x_inv, self.cp_iso_x, raw_max_iso)
         
-        #max_iso = np.array([np.nanmax(self.cp_iso_depth[:, x]) if np.any(~np.isnan(self.cp_iso_depth[:, x])) 
-                        #else 0.0 for x in range(len(self.x_inv))])
-        #min_iso = np.array([np.nanmax(self.cp_iso_depth[:,x]) for x in range(len(self.cp_iso_x))])
         delta_min = (max_iso / self.H_inv) - 1.0 + epsilon
         delta_max = np.ones_like(self.H_inv) - epsilon
-        #min_Hbound = np.log(np.interp(self.x_inv,self.cp_iso_x, min_iso))
-        # print(min_Hbound)
-        # min_Hbound = np.log(np.interp(self.x_inv,self.cp_iso_x, self.cp_iso_depth[-4]))   #for discontinuous
-        #all_bounds = (np.array([-inf_bound,zero_bound,min_Hbound]).flatten() , np.array([inf_bound,inf_bound,inf_bound]).flatten())
+        
         bounds = (np.array([-inf_bound, zero_bound, delta_min]).flatten() , np.array([inf_bound, inf_bound, delta_max]).flatten())
         
-        #H_init = np.nan_to_num(self.H_inv, nan=3000)
-        #self.variables = np.array([np.log(self.a_inv), self.p_prime_inv, np.log(H_init)]).flatten()
         self.variables = np.array([np.log(self.a_inv), self.p_prime_inv, self.Delta_inv]).flatten()
 
         # do least square fit to get variables and hessian matrix
-        # leastsq_fit1D = least_squares(self.residuals, self.variables, bounds=([-np.inf, -np.inf, m.log(max_iso_depth)], [np.inf, np.inf, np.inf]), args=(j,), method='trf')
-        #leastsq_fit = least_squares(self.residuals, self.variables, bounds = all_bounds, method='trf', verbose=2)
         leastsq_fit = least_squares(self.residuals, self.variables, bounds = bounds, method='trf', verbose=2)
 
         self.variables = leastsq_fit.x
@@ -778,10 +706,8 @@ class FlowLine(object):
             self.sigma_m = np.zeros_like(self.x_inv)
             self.sigma_p = np.zeros_like(self.x_inv)
             self.sigma_age = np.zeros_like(self.x_inv)
-                #self.melt_calc()
-        
-       
-        #self.refrozen()
+            self.sigma_stagnant = np.zeros_like(self.x_inv)
+                
 
     # extract data at specified ice core site
     def ice_core(self):
@@ -902,10 +828,11 @@ class FlowLine(object):
             # ----------------------------------------------------------
             #  Computation of age density and max age for the ice core
             # ----------------------------------------------------------
+            #self.ic[name]['dens'] = 1/self.ic[name]['a0']/self.ic[name]['tau']
             self.ic[name]['dens'] = 1/self.ic[name]['a0'][:-2] * (1/self.ic[name]['tau'][1:-1] + 1/self.ic[name]['tau'][:-2]/2)
             self.ic[name]['dens'] = np.append(self.ic[name]['dens'],[np.nan,np.nan,np.nan])
             self.ic[name]['max_age'] = np.interp(self.dens_lim, self.ic[name]['dens'], self.ic[name]['age'] )
-            # self.ic[name]['max_sigma_age'] = np.interp(self.dens_lim, self.ic[name]['dens'], self.ic[name]['sigma_age'] )
+            # # self.ic[name]['max_sigma_age'] = np.interp(self.dens_lim, self.ic[name]['dens'], self.ic[name]['sigma_age'] )
             #self.ic[name]['max_depth'] = np.interp(self.dens_lim, self.ic[name]['dens'], self.ic[name]['depth'] )
             mask = ~np.isnan(self.ic[name]['dens'])
             self.ic[name]['max_depth'] = np.interp(self.dens_lim, self.ic[name]['dens'][mask], self.ic[name]['depth'][mask])
@@ -931,9 +858,9 @@ class FlowLine(object):
                             +'\nStagnant ice depth (m): ' +str(self.ic[name]['H_stag']) \
                             +'\nBasal melt rate (m/yr): ' + str(self.ic[name]['melting']) \
                             +'\nSteady Accumulation (m/yr): '+ str(self.ic[name]['steady_accu']) \
+                            +'\nStagnant ice thickness (m): ' + str(self.ic[name]['stag']) \
                             +'\np: '+ str(self.ic[name]['p']) +'\n'
-                            #+'\nTotal basal layer thickness (stagnant+accreted)(m): ' +str(self.ic[name]['H_obs']-self.ic[name]['H_ref']) \
-                            #+'\nAccreted ice depth (m): ' +str(self.ic[name]['H_ref']) \
+
             if self.output_ic:
                 output = np.vstack((self.ic[name]['depth'], self.ic[name]['age'],
                                     self.ic[name]['tau'],
@@ -968,15 +895,12 @@ class FlowLine(object):
 
         # save inverted parameters and all other related values
         if self.inversion:
-            # output = np.vstack((self.x_inv, self.a_try, self.sigma_a, self.p_try, self.sigma_p, self.H_try, self.sigma_h, self.m_inv, self.sigma_m, self.H_ref, self.H_inv)).T
-            # np.savetxt(self.label+'inverted_results.txt', output, delimiter='\t', header='x(m),a, sigma_a,p, sigma_p,H, sigma_H, m,sigma_m, refrozen, H_obs')
-            
-            output = np.vstack((self.x_inv, self.a_try, self.sigma_a, self.p_try, self.sigma_p, self.H_try, self.m_inv, self.sigma_m, self.H_inv)).T
+            output = np.vstack((self.x_inv, self.a_try, self.sigma_a, self.p_try, self.sigma_p, self.H_try, self.m_try, self.sigma_m, self.H_inv)).T
             np.savetxt(self.label+'inverted_results.txt', output, delimiter='\t', header='x(m),a, sigma_a,p, sigma_p,H, m,sigma_m, H_obs')
 
             self.stagnant = self.H_inv - self.H_try
             self.stagnant[self.stagnant<0] = np.nan
-            output = np.vstack((self.x_inv, self.H_inv, self.H_try, self.stagnant, self.m_inv)).T
+            output = np.vstack((self.x_inv, self.H_inv, self.H_try, self.stagnant, self.m_try)).T
             np.savetxt(self.label+'stagnant.txt', output, delimiter='\t', header='x(m),Hobs, Hinverted, stagnant (m), melt rate')
     
             #parameters save
@@ -1072,6 +996,7 @@ class FlowLine(object):
                              va='bottom', color=color_core)
             plt.savefig(self.label+'mesh_x_z.'+self.fig_format,
                         format=self.fig_format, bbox_inches='tight')
+            
 
             # -------------------------------------------------------------------------
             # Boundary conditions of the flow in x
@@ -1208,7 +1133,7 @@ class FlowLine(object):
             cb.set_ticklabels(levels_cb)
             cb.add_lines(cp2)
             ax.clabel(cp2)
-            cb.set_label('Modeled age (kyr)')
+            cb.set_label('Modelled age (ka)')
             ax.set_xlabel(r'$x$ (km)')
             ax.set_ylabel(r'$z$ (m)')
             ax.grid()
@@ -1231,6 +1156,7 @@ class FlowLine(object):
             self.H = np.interp(self.x, self.x_inv, self.H_try)
 
             fig, ax = plt.subplots(figsize=(12, 6))
+            
             # fig, ax = plt.subplots(figsize=(5, 6))
 
             plt.plot(self.x[self.x>self.x_left], np.zeros_like(self.S)[self.x>self.x_left], label='Surface', color='0')
@@ -1248,12 +1174,9 @@ class FlowLine(object):
                               colors='k',zorder=2)
 
             if self.inversion:
-                #plt.plot(self.x_inv[self.x_inv>self.x_left], self.H_ref[self.x_inv>self.x_left], color='darkblue', zorder=1)    #refrozen ice
                 plt.plot(self.x_inv[self.x_inv>self.x_left], self.H_try[self.x_inv>self.x_left], label='Inverted bedrock', color='darkviolet', zorder=2)    #inverted Bedrock
                 plt.plot(self.x_inv[self.x_inv>self.x_left], self.H_inv[self.x_inv>self.x_left], label='Observed bedrock', color='0', linewidth=2)    # observed Bedrock
 
-                #plt.fill_between(self.x_inv[self.x_inv>self.x_left], self.H_ref[self.x_inv>self.x_left], self.H_try[self.x_inv>self.x_left],
-                    #where=self.H_try[self.x_inv>self.x_left]>self.H_ref[self.x_inv>self.x_left], color='#8B8BC6', label='refrozen ice',interpolate=True,zorder=-1, edgecolor=None)
                 plt.fill_between(self.x_inv[self.x_inv>self.x_left], self.H_inv[self.x_inv>self.x_left], self.H_try[self.x_inv>self.x_left],
                     where=self.H_try[self.x_inv>self.x_left]<self.H_inv[self.x_inv>self.x_left], color='0.7',label='stagnant ice',interpolate=True, edgecolor=None)
                 plt.fill_between(self.x_inv[self.x_inv>self.x_left], self.H_inv[self.x_inv>self.x_left], self.H_try[self.x_inv>self.x_left],
@@ -1265,10 +1188,15 @@ class FlowLine(object):
             cb.set_ticklabels(levels_cb)
             # cb.add_lines(cp2)
             ax.clabel(cp2)
-            cb.set_label('Modeled age (kyr)')
+            cb.set_label('Modelled age (ka)')
             ax.set_xlabel(r'Distance (km)')
             ax.set_ylabel(r'Depth (m)')
 
+            if self.comp_isochrones is not None:
+                for i in range(self.cp_iso_nb):
+                    mask = self.cp_iso_x > self.x_left
+                    plt.plot(self.cp_iso_x[mask], self.cp_iso_depth[i, mask],
+                             color='white', zorder=1)
 
             ax.invert_yaxis()
 
@@ -1301,12 +1229,9 @@ class FlowLine(object):
 
                     plt.plot(self.x[self.x>self.x_left], np.zeros_like(self.S)[self.x>self.x_left], label='Surface', color='0')
 
-                    #plt.plot(self.x_inv[self.x_inv>self.x_left], self.H_ref[self.x_inv>self.x_left], color='darkblue', zorder=1)    #refrozen ice
                     plt.plot(self.x_inv[self.x_inv>self.x_left], self.H_try[self.x_inv>self.x_left], label='Inverted bedrock', color='darkviolet', zorder=2)    #inverted Bedrock
                     plt.plot(self.x_inv[self.x_inv>self.x_left], self.H_inv[self.x_inv>self.x_left], label='Observed bedrock', color='0', linewidth=2)    # observed Bedrock
 
-                    #plt.fill_between(self.x_inv[self.x_inv>self.x_left], self.H_ref[self.x_inv>self.x_left], self.H_try[self.x_inv>self.x_left],
-                        #where=self.H_try[self.x_inv>self.x_left]>self.H_ref[self.x_inv>self.x_left], color='#8B8BC6', label='refrozen ice',interpolate=True,zorder=-1)
                     plt.fill_between(self.x_inv[self.x_inv>self.x_left], self.H_inv[self.x_inv>self.x_left], self.H_try[self.x_inv>self.x_left],
                         where=self.H_try[self.x_inv>self.x_left]<self.H_inv[self.x_inv>self.x_left], color='0.7',label='stagnant ice',interpolate=True)
                     plt.fill_between(self.x_inv[self.x_inv>self.x_left], self.H_inv[self.x_inv>self.x_left], self.H_try[self.x_inv>self.x_left],
@@ -1387,16 +1312,7 @@ class FlowLine(object):
             print(self.mat_age)
             cp2 = plt.contour(self.mat_pi, self.mat_theta, self.mat_age/1000.,
                               levels=levels_iso, colors='k')
-            # # # Corner trajectory
-            # # level0 = np.array([self.Q[0]])
-            # # plt.contour(self.mat_pi, self.mat_theta, self.mat_q, colors='k', linestyles='dashed',
-            # #             levels=level0, linewidths=1)
-            # cb = plt.colorbar(cp)
-            # cb.set_ticks(levels_cb)
-            # cb.set_ticklabels(levels_cb)
-            # cb.add_lines(cp2)
-            # ax.clabel(cp2)
-            # cb.set_label('Modeled age (kyr)')
+           
             ax.set_xlabel(r'$\pi$', fontsize=19)
             ax.set_ylabel(r'$\theta$', fontsize=19)
             ax.grid()
@@ -1463,31 +1379,22 @@ class FlowLine(object):
             plt.contour(self.mat_x[:,self.mat_x[0]>self.x_left], self.mat_depth[:,self.mat_x[0]>self.x_left], self.mat_q[:,self.mat_x[0]>self.x_left], colors=color,
                         levels=levels, linewidths=lw,zorder=3)
 
-            # # Corner trajectory
-            # level0 = np.array([self.Q[0]])
-            # plt.contour(self.mat_x, self.mat_depth, self.mat_q, colors='k', linestyles='dashed',
-            #             levels=level0, linewidths=1, zorder=2)
             # Color contour plot.
             cp = plt.contourf(self.mat_x[:,self.mat_x[0]>self.x_left], self.mat_depth[:,self.mat_x[0]>self.x_left], self.mat_q[:,self.mat_x[0]>self.x_left], levels=levels,
                               locator=ticker.LogLocator())
-            # plt.plot(self.x, self.B, label='Bedrock', color='0')
             cb = plt.colorbar(cp)
             cb.set_label('Total ice flux')
-            # cb.set_ticks(np.array([np.min(self.plmat_q[:,self.mat_x[0]>self.x_left]), np.max(self.mat_q[:,self.mat_x[0]>self.x_left])]))
             cb.set_ticklabels([])
             if self.inversion:
 
                 plt.plot(self.x[self.x>self.x_left], np.zeros_like(self.S)[self.x>self.x_left], label='Surface', color='0')
-                #plt.plot(self.x_inv[self.x_inv>self.x_left], self.H_ref[self.x_inv>self.x_left], color='darkblue', zorder=1)    #refrozen ice
-                plt.plot(self.x_inv[self.x_inv>self.x_left], self.H_try[self.x_inv>self.x_left], label='Inverted bedrock', color='darkviolet', zorder=2)    #inverted Bedrock
+                #plt.plot(self.x_inv[self.x_inv>self.x_left], self.H_try[self.x_inv>self.x_left], label='Inverted bedrock', color='darkviolet', zorder=2)    #inverted Bedrock
+                plt.plot(self.x_inv[self.x_inv>self.x_left], self.H_try[self.x_inv>self.x_left], color='k', zorder=2)    #inverted Bedrock
+                
                 plt.plot(self.x_inv[self.x_inv>self.x_left], self.H_inv[self.x_inv>self.x_left], label='Observed bedrock', color='0', linewidth=2)    # observed Bedrock
                 # Fake plots for the legend
                 plt.plot(self.x_inv[self.x_inv>self.x_left], self.H_inv[self.x_inv>self.x_left], label="Trajectories", color=color, linewidth=lw)
-                plt.plot(self.x_inv[self.x_inv>self.x_left], self.H_inv[self.x_inv>self.x_left], label="Corner trajectory", color='k', linewidth=1,
-                         linestyle='dashed')
-
-                #plt.fill_between(self.x_inv[self.x_inv>self.x_left], self.H_ref[self.x_inv>self.x_left], self.H_try[self.x_inv>self.x_left],
-                    #where=self.H_try[self.x_inv>self.x_left]>self.H_ref[self.x_inv>self.x_left], color='#8B8BC6', label='refrozen ice',interpolate=True,zorder=-1, edgecolor=None)
+               
                 plt.fill_between(self.x_inv[self.x_inv>self.x_left], self.H_inv[self.x_inv>self.x_left], self.H_try[self.x_inv>self.x_left],
                     where=self.H_try[self.x_inv>self.x_left]<self.H_inv[self.x_inv>self.x_left], color='0.7',label='stagnant ice',interpolate=True)
                 plt.fill_between(self.x_inv[self.x_inv>self.x_left], self.H_inv[self.x_inv>self.x_left], self.H_try[self.x_inv>self.x_left],
@@ -1516,8 +1423,9 @@ class FlowLine(object):
             ax.grid(color='gray', alpha=0.3)
             plt.savefig(self.label+'stream_lines.'+self.fig_format,
                         format=self.fig_format, bbox_inches='tight')
-
-
+            
+            
+            
             # ---------------------------------------------------------------------
             # R(t) - Age
             # ---------------------------------------------------------------------
@@ -1545,7 +1453,16 @@ class FlowLine(object):
                 ax[1].fill_between(self.x_inv, self.p_try+self.sigma_p, self.p_try-self.sigma_p, color='C1', alpha=0.3, edgecolor=None)
                 ax[2].fill_between(self.x_inv, self.Delta_try+self.sigma_Delta, self.Delta_try-self.sigma_Delta, color='C2', alpha=0.3, edgecolor=None)
                 ax[3].fill_between(self.x_inv, self.m_try+self.sigma_m, self.m_try-self.sigma_m, color='C3', alpha=0.3, edgecolor=None)
+                
+               # ax3b.fill_between(self.x_inv, np.maximum(0., self.stagnant + self.sigma_stagnant), np.maximum(0., self.stagnant - self.sigma_stagnant),
+                                #  color='grey', alpha=0.3, edgecolor=None)
+                
                 #ax3b.fill_between(self.x_inv, self.stagnant, 0, color='grey', alpha=0.3, edgecolor=None)
+                # sigma_stagnant = self.stagnant * self.sigma_H
+                # stagnant_filled = np.where(~np.isnan(self.stagnant), self.stagnant, 0.)
+                # ax3b.fill_between(self.x_inv,stagnant_filled + sigma_stagnant,np.maximum(stagnant_filled - sigma_stagnant, 0),
+                #                   color='grey', alpha=0.3, edgecolor=None)
+                
                 # ax[2].set_ylim(np.min(self.H_try)-300, np.max(self.H_try)+300)
                 # ax[2].invert_yaxis()
                 ax[0].set_ylabel('a (m/yr)', color='C0')
@@ -1555,8 +1472,64 @@ class FlowLine(object):
                 ax[3].set_xlabel('Distance (km)')
                 ax3b.set_ylabel('stagnant ice thickness (m)', color='grey')
 
+                ax[2].set_ylim(bottom=-0.5, top=0.5)
+
                 plt.setp(ax, xlim=(np.min(self.x), np.max(self.x)))
                 plt.savefig(self.label+'inverted_params.'+self.fig_format,
+                            format=self.fig_format, bbox_inches='tight')
+                
+            # ---------------------------------------------------------------------
+            # inverted parameters paper 
+            # ---------------------------------------------------------------------
+            if self.inversion:
+                fig, ax = plt.subplots(4, figsize=(7,10))
+                
+    
+                old = np.loadtxt(self.label+'inverted_results-old.txt', delimiter='\t')
+                x_old = old[:, 0]   
+                a_old = old[:, 1]
+                p_old = old[:, 3]
+                m_old = old[:, 7]
+            
+                x_old_s, stagnant_old = np.loadtxt(self.label+'stagnant-old.txt',
+                                    delimiter='\t', usecols=(0, 3), unpack=True)
+                x_old_s = x_old_s    
+                
+                self.stagnant = np.where(self.stagnant == 0, np.nan, self.stagnant)
+                stagnant_old = np.where(stagnant_old == 0, np.nan, stagnant_old)
+                
+                self.m_try = np.where(self.m_try == 0, np.nan, self.m_try)
+                m_old = np.where(m_old == 0, np.nan, m_old)
+                
+    
+                ax[0].plot(self.x_inv, self.a_try, color='C0', zorder=2)
+                ax[1].plot(self.x_inv, self.p_try, color='C1', zorder=2)
+                ax[2].plot(self.x_inv, self.Delta_try, color='C2', zorder=2)
+                ax[3].plot(self.x_inv, self.m_try*1000, color='C3', zorder=2)
+                ax3b = ax[3].twinx()
+                ax3b.plot(self.x_inv, self.stagnant, color='grey', zorder=2)
+            
+                
+                ax[0].fill_between(self.x_inv, self.a_try+self.sigma_a, self.a_try-self.sigma_a, color='C0', alpha=0.3, edgecolor=None, zorder=1)
+                ax[1].fill_between(self.x_inv, self.p_try+self.sigma_p, self.p_try-self.sigma_p, color='C1', alpha=0.3, edgecolor=None, zorder=1)
+                ax[2].fill_between(self.x_inv, self.Delta_try+self.sigma_Delta, self.Delta_try-self.sigma_Delta, color='C2', alpha=0.3, edgecolor=None, zorder=1)
+                ax[3].fill_between(self.x_inv, (self.m_try+self.sigma_m)*1000, (self.m_try-self.sigma_m)*1000, color='C3', alpha=0.3, edgecolor=None, zorder=1)
+            
+                
+                ax[0].plot(x_old, a_old, color='C0', linestyle='dashed', zorder=3)
+                ax[1].plot(x_old, p_old, color='C1', linestyle='dashed', zorder=3)
+                ax[3].plot(x_old, m_old, color='C3', linestyle='dashed', zorder=3)
+                ax3b.plot(x_old_s, stagnant_old, color='grey', linestyle='dashed', zorder=3)
+            
+                ax[0].set_ylabel(r'$\bar{a}$ (m/a)', color='C0')
+                ax[1].set_ylabel('p (a.u.)', color='C1')
+                ax[2].set_ylabel(r'$\Delta$ (a.u.)', color='C2')
+                ax[3].set_ylabel('m (mm/a)', color='C3')
+                ax[3].set_xlabel('Distance (km)')
+                ax3b.set_ylabel('stagnant ice thickness (m)', color='grey')
+                ax[2].set_ylim(bottom=-0.5, top=0.5)
+                plt.setp(ax, xlim=(np.min(self.x), np.max(self.x)))
+                plt.savefig(self.label+'inverted_params_paper.'+self.fig_format,
                             format=self.fig_format, bbox_inches='tight')
 
             # ----------------------------------------------------------
@@ -1585,6 +1558,11 @@ class FlowLine(object):
                 ax2.spines['top'].set_color('b')
                 ax2.tick_params(axis='x', colors='b')
                 
+                age_point = np.interp(self.depth_max_density, self.ic[name]['depth'], self.ic[name]['age']) / 1000
+
+                ax2.plot(age_point, self.depth_max_density, marker='*', 
+                         color='yellow', markersize=15, label='Densité Max', markeredgecolor='black', zorder=10)
+                
                 iso_depth_at_ic = np.array([np.interp(self.ic[name]['x'], self.x_obs, self.iso_obs_depth[i])
                                             for i in range(self.cp_iso_nb)])
                 iso_age_at_ic   = self.iso_obs_age[:, 0] / 1000        
@@ -1606,6 +1584,72 @@ class FlowLine(object):
 
                 plt.savefig(self.label+name+'_ice_core_vs_depth.'+self.fig_format,
                             format=self.fig_format, bbox_inches='tight')
+                
+            # ----------------------------------------------------------
+            # Graphs vs depth for the ice core paper
+            # ----------------------------------------------------------
+
+            # for name in self.ic:
+            #     fig, ax = plt.subplots(figsize=(7, 7))
+            #     ax.set_ylabel('depth (m)')
+            #     ax.invert_yaxis()
+            #     ax.plot(self.ic[name]['x0'], self.ic[name]['depth'], color='r')
+            #     if self.ic[name]['comp'] is not None and ~np.isnan(self.ic[name]['cp_x']).all():
+            #         ax.plot(self.ic[name]['cp_x'], self.ic[name]['cp_depth'], color='r',
+            #                 linestyle='dashed')
+            #     ax.set_xlabel(r'$x$ origin (km)', color='r')
+            #     ax.spines['bottom'].set_color('r')
+            #     ax.tick_params(axis='x', colors='r')
+            
+            #     ax2 = ax.twiny()
+            #     ax2.spines.bottom.set_visible(False)
+            #     ax2.plot(self.ic[name]['age']/1000, self.ic[name]['depth'], color='b', label='This study')
+            #     if self.ic[name]['comp'] is not None and \
+            #             ~np.isnan(self.ic[name]['cp_age']).all():
+            #         ax2.plot(self.ic[name]['cp_age'], self.ic[name]['cp_depth'], color='b',
+            #                  linestyle='dashed', label='AICC2023 (Bouchet et al. 2023)')
+            
+                
+            #     if name == 'EDC':
+            #         chung_depth, chung_age = np.loadtxt(self.label+'EDC_ice_core_output-Chung.txt',
+            #                                              usecols=(0, 1), unpack=True)
+            #         ax2.plot(chung_age/1000, chung_depth, color='b', linestyle='dotted',
+            #                  label='Chung et al. 2025')
+            
+            #     ax2.set_xlabel('age (kyr)', color='b')
+            #     ax2.spines['top'].set_color('b')
+            #     ax2.tick_params(axis='x', colors='b')
+            
+               
+            #     if name == 'BELDC':
+            #         ax2.set_xlim(right=1500)
+            
+            #     #age_point = np.interp(self.depth_max_density, self.ic[name]['depth'], self.ic[name]['age']) / 1000
+            #     #ax2.plot(age_point, self.depth_max_density, marker='*',
+            #              #color='yellow', markersize=15, label='Densité Max', markeredgecolor='black', zorder=10)
+            
+            #     iso_depth_at_ic = np.array([np.interp(self.ic[name]['x'], self.x_obs, self.iso_obs_depth[i])
+            #                                 for i in range(self.cp_iso_nb)])
+            #     iso_age_at_ic   = self.iso_obs_age[:, 0] / 1000
+            #     iso_sigma_at_ic = self.iso_obs_age_sigma[:, 0] / 1000
+            #     ax2.errorbar(iso_age_at_ic, iso_depth_at_ic, xerr=iso_sigma_at_ic, fmt=".", label='Isochrones', color='black')
+            
+            #     ax3 = ax.twiny()
+            #     ax3.spines['top'].set_position(('axes', 1.1))
+            #     ax3.spines.bottom.set_visible(False)
+            #     ax3.plot(self.ic[name]['tau'], self.ic[name]['depth'], color='g')
+            #     if self.ic[name]['comp'] is not None and \
+            #             ~np.isnan(self.ic[name]['cp_tau']).all():
+            #         ax3.plot(self.ic[name]['cp_tau'], self.ic[name]['cp_depth'], color='g',
+            #                  linestyle='dashed')
+            #     ax3.set_xlabel('thinning function (no unit)', color='g')
+            #     ax3.spines['top'].set_color('g')
+            #     ax3.tick_params(axis='x', colors='g')
+                
+            #     ax2.legend(loc='upper left', bbox_to_anchor=(0.15, 1.0))
+            
+            #     plt.savefig(self.label+name+'_ice_core_vs_depth.'+self.fig_format,
+            #                 format=self.fig_format, bbox_inches='tight')
 
             # ----------------------------------------------
             # Graphs vs age for the ice core
@@ -1633,19 +1677,15 @@ class FlowLine(object):
             plt.plot(self.x[self.x>self.x_left], np.zeros_like(self.S)[self.x>self.x_left], label='Surface', color='0')
 
             if self.inversion:
-                #plt.plot(self.x_inv[self.x_inv>self.x_left], self.H_ref[self.x_inv>self.x_left], color='darkblue', zorder=1)    #refrozen ice
                 plt.plot(self.x_inv[self.x_inv>self.x_left], self.H_try[self.x_inv>self.x_left], label='Inverted Bedrock', color='darkviolet', zorder=3)    #inverted Bedrock
                 plt.plot(self.x_inv[self.x_inv>self.x_left], self.H_inv[self.x_inv>self.x_left], label='Observed Bedrock', color='0', zorder=3, linewidth=2)    # observed Bedrock
 
-                #plt.fill_between(self.x_inv[self.x_inv>self.x_left], self.H_ref[self.x_inv>self.x_left], self.H_try[self.x_inv>self.x_left],
-                    #where=self.H_try[self.x_inv>self.x_left]>self.H_ref[self.x_inv>self.x_left], color='#8B8BC6', label='refrozen ice',interpolate=True,zorder=-1)
                 plt.fill_between(self.x_inv[self.x_inv>self.x_left], self.H_inv[self.x_inv>self.x_left], self.H_try[self.x_inv>self.x_left],
                     where=self.H_try[self.x_inv>self.x_left]<self.H_inv[self.x_inv>self.x_left], color='0.7',label='stagnant ice',interpolate=True)
                 plt.fill_between(self.x_inv[self.x_inv>self.x_left], self.H_inv[self.x_inv>self.x_left], np.max(self.H_try),
                     where=self.H_try[self.x_inv>self.x_left]>self.H_inv[self.x_inv>self.x_left], color='white', interpolate=True, edgecolor=None)
             else:
                 plt.plot(self.x[self.x>self.x_left], self.H[self.x>self.x_left], label='Bedrock', color='0')
-            # plt.plot(self.x, resi.T)
             resi = self.iso_mod_age-self.iso_obs_age
             for i in range(len(resi)):
                 plt.scatter(self.x_obs[self.x_obs>self.x_left], self.iso_obs_depth[i][self.x_obs>self.x_left], c=resi[i][self.x_obs>self.x_left], s=3,
@@ -1729,7 +1769,6 @@ class FlowLine(object):
         self.interpolation()
         # run inversion
         if self.inversion == False:
-            #self.variables = np.array([np.log(self.a_inv), self.p_prime_inv, np.log(self.H_inv)]).flatten()
             self.variables = np.array([np.log(self.a_inv), self.p_prime_inv, self.Delta_inv]).flatten()
             
             self.residuals(self.variables)
