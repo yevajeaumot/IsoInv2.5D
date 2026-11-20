@@ -747,7 +747,7 @@ class FlowLine(object):
                 aa0 = self.mat_a0[:, self.imax][ggrid]
                 ssteady_age = self.mat_steady_age[:, self.imax][ggrid]
                 xx0 = self.mat_x0[:, self.imax][ggrid]
-                #ttau = self.mat_tau_anal[:, self.imax][ggrid]
+                ttau = self.mat_tau_anal[:, self.imax][ggrid]
                 ttheta = self.theta[ggrid]
                 self.ic[name]['S'] = self.S[self.imax]
             else:
@@ -763,8 +763,8 @@ class FlowLine(object):
                 ssteady_age = self.inter * self.mat_steady_age[:, ii][ggrid] +\
                     (1-self.inter) * self.mat_steady_age[:, ii+1][ggrid]
                 xx0 = self.inter * self.mat_x0[:, ii][ggrid] + (1-self.inter) * self.mat_x0[:, ii+1][ggrid]
-                #ttau = self.inter * self.mat_tau_anal[:, ii][ggrid] +\
-                #    (1-self.inter) * self.mat_tau_anal[:, ii+1][ggrid]
+                ttau = self.inter * self.mat_tau_anal[:, ii][ggrid] +\
+                    (1-self.inter) * self.mat_tau_anal[:, ii+1][ggrid]
                 ttheta = self.theta[ggrid]
                 self.ic[name]['S'] = self.inter * self.S[ii] + (1-self.inter) * self.S[ii+1]
                 self.ic[name]['PI'] = self.pi[ii] + self.inter*(self.pi[ii+1]-self.pi[ii])
@@ -824,6 +824,11 @@ class FlowLine(object):
             aa = (steady_a0_ic[1:]+steady_a0_ic[:-1]) / 2
             self.ic[name]['tau'] = (ie_depth_ic[1:] - ie_depth_ic[:-1]) / aa / \
                 (steady_age_ic[1:] - steady_age_ic[:-1])
+
+            # Thinning analytique au forage (valeurs aux nœuds, même taille que depth)
+            ok = ~np.isnan(ttau)
+            self.ic[name]['tau_anal'] = np.interp(-self.ic[name]['theta'], -ttheta[ok], ttau[ok],
+                                      right=np.nan)
 
             # ----------------------------------------------------------
             #  Computation of age density and max age for the ice core
@@ -1512,8 +1517,8 @@ class FlowLine(object):
                 
                 ax[0].fill_between(self.x_inv, self.a_try+self.sigma_a, self.a_try-self.sigma_a, color='C0', alpha=0.3, edgecolor=None, zorder=1)
                 ax[1].fill_between(self.x_inv, self.p_try+self.sigma_p, self.p_try-self.sigma_p, color='C1', alpha=0.3, edgecolor=None, zorder=1)
-                ax[2].fill_between(self.x_inv, self.Delta_try+self.sigma_Delta, self.Delta_try-self.sigma_Delta, color='C2', alpha=0.3, edgecolor=None, zorder=1)
-                ax[3].fill_between(self.x_inv, (self.m_try+self.sigma_m)*1000, (self.m_try-self.sigma_m)*1000, color='C3', alpha=0.3, edgecolor=None, zorder=1)
+                #ax[2].fill_between(self.x_inv, self.Delta_try+self.sigma_Delta, self.Delta_try-self.sigma_Delta, color='C2', alpha=0.3, edgecolor=None, zorder=1)
+                #ax[3].fill_between(self.x_inv, (self.m_try+self.sigma_m)*1000, (self.m_try-self.sigma_m)*1000, color='C3', alpha=0.3, edgecolor=None, zorder=1)
             
                 
                 ax[0].plot(x_old, a_old, color='C0', linestyle='dashed', zorder=3)
@@ -1521,14 +1526,15 @@ class FlowLine(object):
                 ax[3].plot(x_old, m_old, color='C3', linestyle='dashed', zorder=3)
                 ax3b.plot(x_old_s, stagnant_old, color='grey', linestyle='dashed', zorder=3)
             
-                ax[0].set_ylabel(r'$\bar{a}$ (m/a)', color='C0')
+                ax[0].set_ylabel(r'$\bar{a}$ (m/yr)', color='C0')
                 ax[1].set_ylabel('p (a.u.)', color='C1')
                 ax[2].set_ylabel(r'$\Delta$ (a.u.)', color='C2')
-                ax[3].set_ylabel('m (mm/a)', color='C3')
+                ax[3].set_ylabel('m (mm/yr)', color='C3')
                 ax[3].set_xlabel('Distance (km)')
                 ax3b.set_ylabel('stagnant ice thickness (m)', color='grey')
-                ax[2].set_ylim(bottom=-0.5, top=0.5)
-                plt.setp(ax, xlim=(np.min(self.x), np.max(self.x)))
+                ax[0].set_ylim(bottom=0.01, top=0.03)
+                ax[2].set_ylim(bottom=-0.2, top=0.2)
+                plt.setp(ax, xlim=(self.x_left, np.max(self.x)))
                 plt.savefig(self.label+'inverted_params_paper.'+self.fig_format,
                             format=self.fig_format, bbox_inches='tight')
 
@@ -1573,7 +1579,12 @@ class FlowLine(object):
                 ax3 = ax.twiny()
                 ax3.spines['top'].set_position(('axes', 1.1))
                 ax3.spines.bottom.set_visible(False)
-                ax3.plot(self.ic[name]['tau'], self.ic[name]['depth'], color='g')
+                
+                ax3.plot(self.ic[name]['tau_anal'], self.ic[name]['depth'], color='g')
+
+                #ax3.plot(self.ic[name]['tau'], self.ic[name]['depth'], color='g', linestyle='dotted')
+                
+                #ax3.plot(self.ic[name]['tau'], self.ic[name]['depth'], color='g')
                 if self.ic[name]['comp'] is not None and \
                         ~np.isnan(self.ic[name]['cp_tau']).all():
                     ax3.plot(self.ic[name]['cp_tau'], self.ic[name]['cp_depth'], color='g',
@@ -1585,9 +1596,9 @@ class FlowLine(object):
                 plt.savefig(self.label+name+'_ice_core_vs_depth.'+self.fig_format,
                             format=self.fig_format, bbox_inches='tight')
                 
-            # ----------------------------------------------------------
-            # Graphs vs depth for the ice core paper
-            # ----------------------------------------------------------
+            # # ----------------------------------------------------------
+            # # Graphs vs depth for the ice core paper
+            # # ----------------------------------------------------------
 
             # for name in self.ic:
             #     fig, ax = plt.subplots(figsize=(7, 7))
@@ -1637,7 +1648,9 @@ class FlowLine(object):
             #     ax3 = ax.twiny()
             #     ax3.spines['top'].set_position(('axes', 1.1))
             #     ax3.spines.bottom.set_visible(False)
-            #     ax3.plot(self.ic[name]['tau'], self.ic[name]['depth'], color='g')
+            #     ax3.plot(self.ic[name]['tau_anal'], self.ic[name]['depth'], color='g')
+
+            # #     ax3.plot(self.ic[name]['tau'], self.ic[name]['depth'], color='g')
             #     if self.ic[name]['comp'] is not None and \
             #             ~np.isnan(self.ic[name]['cp_tau']).all():
             #         ax3.plot(self.ic[name]['cp_tau'], self.ic[name]['cp_depth'], color='g',
